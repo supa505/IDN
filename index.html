@@ -59,7 +59,82 @@ button[aria-label="Toggle theme"],button[aria-label="Toggle color theme"]{displa
 <div id="app"><div class="loading" role="status" aria-label="Loading workspace"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div></div>
 <div id="layer"></div><div id="confirm-layer"></div><div id="toasts" aria-live="polite" aria-atomic="true"></div>
 <noscript>TugasSupa needs JavaScript enabled to save and manage your workspace.</noscript>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <script>
+/* Firebase Sync Module - Cloud sync for TugasSupa */
+(function(){
+  const firebaseConfig = {
+    apiKey: "AIzaSyCHX4GjdclykN6j4A9cu8Af6ngCkHwk8wg",
+    authDomain: "tugassupa-sync.firebaseapp.com",
+    databaseURL: "https://tugassupa-sync-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "tugassupa-sync",
+    storageBucket: "tugassupa-sync.firebasestorage.app",
+    messagingSenderId: "640716066488",
+    appId: "1:640716066488:web:e25f1df21522d3d942ae4d"
+  };
+  firebase.initializeApp(firebaseConfig);
+  window.TSFB = {
+    db: firebase.database(),
+    lastSync: null,
+    syncing: false,
+    
+    // Sync data to Firebase
+    async syncToCloud(data) {
+      if (this.syncing) return;
+      this.syncing = true;
+      try {
+        const ref = this.db.ref('workspace');
+        await ref.set({...data, lastSync: Date.now()});
+        this.lastSync = new Date();
+        localStorage.setItem('ts-lastSync', this.lastSync.toISOString());
+        return true;
+      } catch(e) {
+        console.error('Sync error:', e);
+        return false;
+      } finally {
+        this.syncing = false;
+      }
+    },
+    
+    // Load data from Firebase
+    async loadFromCloud() {
+      try {
+        const ref = this.db.ref('workspace');
+        const snap = await ref.once('value');
+        const data = snap.val();
+        if (data && data.tasks) {
+          this.lastSync = new Date();
+          localStorage.setItem('ts-lastSync', this.lastSync.toISOString());
+          return data;
+        }
+        return null;
+      } catch(e) {
+        console.error('Load error:', e);
+        return null;
+      }
+    },
+    
+    // Get last sync time
+    getLastSync() {
+      const saved = localStorage.getItem('ts-lastSync');
+      return saved ? new Date(saved) : null;
+    },
+    
+    // Format last sync
+    formatLastSync() {
+      const last = this.getLastSync();
+      if (!last) return 'Never';
+      const now = new Date();
+      const diff = Math.floor((now - last) / 1000);
+      if (diff < 60) return 'Just now';
+      if (diff < 3600) return Math.floor(diff/60) + ' min ago';
+      if (diff < 86400) return Math.floor(diff/3600) + ' hours ago';
+      return last.toLocaleDateString();
+    }
+  };
+})();
+
 /* TugasSupa data domain. No UI dependencies; replace the storage adapter for a backend. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.TSCore=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
 'use strict';
@@ -1097,6 +1172,20 @@ function renderSettings(state){
     </div>
    </div>
 
+   <!-- Cloud Sync -->
+   <div class="panel settings-section">
+    <h2>☁️ Cloud Sync</h2>
+    <p>Sync your workspace to the cloud. Access your tasks from any device - laptop, phone, or tablet.</p>
+    <div class="sync-status" style="margin-bottom:15px;padding:12px;background:var(--soft);border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
+     <span>Last synced: <strong id="last-sync-time">${window.TSFB?.formatLastSync()||'Never'}</strong></span>
+     <span class="pill blue" id="sync-status-pill">Ready</span>
+    </div>
+    <div class="settings-actions">
+     <button class="button primary" id="sync-to-cloud-btn" onclick="TSApp.syncToCloud()">${icon('cloud')} Sync to Cloud</button>
+     <button class="button" id="load-from-cloud-btn" onclick="TSApp.loadFromCloud()">${icon('download')} Load from Cloud</button>
+    </div>
+   </div>
+
    <!-- Backup & Portability -->
    <div class="panel settings-section">
     <h2>Data Portability & GitHub Pages</h2>
@@ -1731,6 +1820,60 @@ function handleCommandInput(q){activeCommands=commandItems(q.trim());commandInde
 function selectCommand(i){commandIndex=activeCommands.length?(i+activeCommands.length)%activeCommands.length:0;document.querySelectorAll('.command-item').forEach((el,n)=>{el.classList.toggle('selected',n===commandIndex);el.setAttribute('aria-selected',String(n===commandIndex));});const input=document.getElementById('command-input');if(input){if(activeCommands.length)input.setAttribute('aria-activedescendant','cmd-'+commandIndex);else input.removeAttribute('aria-activedescendant');}document.getElementById('cmd-'+commandIndex)?.scrollIntoView({block:'nearest'});}
 function runCommand(i){const r=activeCommands[i];if(r){closeLayer();r.run();}}
 function confirmDialog(title,message,actionName='Confirm',danger=false){return new Promise(resolve=>{const layer=document.getElementById('confirm-layer');layer.innerHTML=`<div class="overlay" role="dialog" aria-modal="true" aria-labelledby="cf-title"><section class="dialog" style="max-width:440px"><header class="dialog-head"><h2 id="cf-title">${html(title)}</h2></header><div class="dialog-body"><p class="muted">${html(message)}</p><div class="form-actions"><button type="button" class="button" id="cf-cancel">Cancel</button><button type="button" class="button ${danger?'danger':'primary'}" id="cf-ok">${html(actionName)}</button></div></div></section></div>`;const finish=value=>{layer.innerHTML='';resolve(value);};layer.querySelector('#cf-cancel').onclick=()=>finish(false);layer.querySelector('#cf-ok').onclick=()=>finish(true);layer.querySelector('.overlay').onclick=e=>{if(e.target===e.currentTarget)finish(false);};});}
+// ===== Cloud Sync Functions =====
+async function syncToCloud(){
+  if(!window.TSFB){toast('Firebase not loaded');return;}
+  const btn=document.getElementById('sync-to-cloud-btn');
+  const pill=document.getElementById('sync-status-pill');
+  const timeEl=document.getElementById('last-sync-time');
+  
+  btn.disabled=true;btn.textContent='Syncing...';
+  pill.textContent='Syncing';pill.className='pill amber';
+  
+  const data=store.get();
+  const ok=await window.TSFB.syncToCloud(data);
+  
+  btn.disabled=false;btn.innerHTML=icon('cloud')+' Sync to Cloud';
+  if(ok){
+    pill.textContent='Synced';pill.className='pill green';
+    timeEl.textContent=window.TSFB.formatLastSync();
+    toast('✓ Workspace synced to cloud');
+  }else{
+    pill.textContent='Failed';pill.className='pill red';
+    toast('✗ Sync failed. Check connection.');
+  }
+}
+
+async function loadFromCloud(){
+  if(!window.TSFB){toast('Firebase not loaded');return;}
+  const btn=document.getElementById('load-from-cloud-btn');
+  const pill=document.getElementById('sync-status-pill');
+  const timeEl=document.getElementById('last-sync-time');
+  
+  btn.disabled=true;btn.textContent='Loading...';
+  pill.textContent='Loading';pill.className='pill amber';
+  
+  const data=await window.TSFB.loadFromCloud();
+  
+  btn.disabled=false;btn.innerHTML=icon('download')+' Load from Cloud';
+  
+  if(data && data.tasks){
+    const ok=await confirmDialog('Load from cloud?','This will replace your current workspace with the cloud version.',"Load");
+    if(ok){
+      store.replace(data);
+      render();
+      pill.textContent='Loaded';pill.className='pill green';
+      timeEl.textContent=window.TSFB.formatLastSync();
+      toast('✓ Workspace loaded from cloud');
+    }else{
+      pill.textContent='Ready';pill.className='pill blue';
+    }
+  }else{
+    pill.textContent='No data';pill.className='pill amber';
+    toast('No cloud data found. Sync first.');
+  }
+}
+
 function downloadJSON(data,name){const blob=new Blob([typeof data==='string'?data:JSON.stringify(data,null,2)],{type:'application/json'}),link=document.createElement('a'),href=URL.createObjectURL(blob);link.href=href;link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(href),1000);}
 function exportData(){downloadJSON(store.get(),`TugasSupa-Workspace-${TSCore.dayKey(new Date())}.json`);toast('Workspace exported');}
 async function importData(e){const file=e.target.files?.[0];if(!file)return;try{if(file.size>10*1024*1024)throw Error('This file exceeds the 10 MB import limit.');const parsed=JSON.parse(await file.text());const data=TSCore.normalize(parsed);if(!['tasks','projects','subjects','links'].every(k=>Array.isArray(parsed[k])))throw Error('Choose a complete TugasSupa workspace backup.');const counts=['tasks','projects','subjects','links'].map(k=>data[k].length+' '+k).join(', ');const ok=await confirmDialog('Import workspace?',`This file contains ${counts}. It will replace your current workspace. A recovery backup is saved before replacement. Export first for a permanent copy.`,'Import');if(!ok)return;if(store.readError)store.recover(data);else store.replace(data);closeLayer();render();toast('Workspace imported. Previous workspace backed up.');}catch(err){toast(err instanceof SyntaxError?'Import stopped: this file is not valid JSON.':('Import stopped: '+err.message));}finally{e.target.value='';}}
