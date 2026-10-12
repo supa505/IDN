@@ -1853,18 +1853,40 @@ async function loadFromCloud(){
   btn.disabled=true;btn.textContent='Loading...';
   pill.textContent='Loading';pill.className='pill amber';
   
-  const data=await window.TSFB.loadFromCloud();
+  let data;
+  try{
+    data=await window.TSFB.loadFromCloud();
+  }catch(err){
+    btn.disabled=false;btn.innerHTML=icon('download')+' Load from Cloud';
+    pill.textContent='Error';pill.className='pill red';
+    toast('Load error: '+err.message);
+    return;
+  }
   
   btn.disabled=false;btn.innerHTML=icon('download')+' Load from Cloud';
   
+  // Debug: log what we got
+  console.log('Cloud data:',data);
+  
   if(data && data.tasks){
-    const ok=await confirmDialog('Load from cloud?','This will replace your current workspace with the cloud version.',"Load");
+    // Firebase converts arrays to objects - normalize them
+    const fixArr=v=>Array.isArray(v)?v:(v&&typeof v==='object'?Object.values(v):[]);
+    data.tasks=fixArr(data.tasks);
+    data.projects=fixArr(data.projects);
+    data.subjects=fixArr(data.subjects);
+    data.links=fixArr(data.links);
+    
+    const ok=await confirmDialog('Load from cloud?','This will replace your current workspace with the cloud version ('+data.tasks.length+' tasks, '+data.projects.length+' projects).',"Load");
     if(ok){
-      store.replace(data);
+      try{
+        if(store.readError)store.recover(data);else store.replace(data);
+      }catch(e){
+        store.recover(data);
+      }
       render();
       pill.textContent='Loaded';pill.className='pill green';
       timeEl.textContent=window.TSFB.formatLastSync();
-      toast('✓ Workspace loaded from cloud');
+      toast('✓ Workspace loaded from cloud ('+data.tasks.length+' tasks)');
     }else{
       pill.textContent='Ready';pill.className='pill blue';
     }
