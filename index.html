@@ -103,7 +103,13 @@ button[aria-label="Toggle theme"],button[aria-label="Toggle color theme"]{displa
         const ref = this.db.ref('workspace');
         const snap = await ref.once('value');
         const data = snap.val();
-        if (data && data.tasks) {
+        if (data && typeof data === 'object') {
+          // Firebase RTDB removes empty arrays - restore them
+          data.tasks = Array.isArray(data.tasks) ? data.tasks : (data.tasks && typeof data.tasks === 'object' ? Object.values(data.tasks) : []);
+          data.projects = Array.isArray(data.projects) ? data.projects : (data.projects && typeof data.projects === 'object' ? Object.values(data.projects) : []);
+          data.subjects = Array.isArray(data.subjects) ? data.subjects : (data.subjects && typeof data.subjects === 'object' ? Object.values(data.subjects) : []);
+          data.links = Array.isArray(data.links) ? data.links : (data.links && typeof data.links === 'object' ? Object.values(data.links) : []);
+          data.settings = data.settings || {name:'Muhammad',theme:'system',weeklyTarget:10};
           this.lastSync = new Date();
           localStorage.setItem('ts-lastSync', this.lastSync.toISOString());
           return data;
@@ -1868,15 +1874,14 @@ async function loadFromCloud(){
   // Debug: log what we got
   console.log('Cloud data:',data);
   
-  if(data && data.tasks){
-    // Firebase converts arrays to objects - normalize them
-    const fixArr=v=>Array.isArray(v)?v:(v&&typeof v==='object'?Object.values(v):[]);
-    data.tasks=fixArr(data.tasks);
-    data.projects=fixArr(data.projects);
-    data.subjects=fixArr(data.subjects);
-    data.links=fixArr(data.links);
+  if(data && typeof data === 'object'){
+    data.tasks = Array.isArray(data.tasks)?data.tasks:[];
+    data.projects = Array.isArray(data.projects)?data.projects:[];
+    data.subjects = Array.isArray(data.subjects)?data.subjects:[];
+    data.links = Array.isArray(data.links)?data.links:[];
     
-    const ok=await confirmDialog('Load from cloud?','This will replace your current workspace with the cloud version ('+data.tasks.length+' tasks, '+data.projects.length+' projects).',"Load");
+    const totalItems = data.tasks.length + data.projects.length + data.subjects.length + data.links.length;
+    const ok=await confirmDialog('Load from cloud?','This will replace your current workspace with the cloud version ('+totalItems+' items: '+data.tasks.length+' tasks, '+data.projects.length+' projects, '+data.links.length+' links).',"Load");
     if(ok){
       try{
         if(store.readError)store.recover(data);else store.replace(data);
@@ -1886,7 +1891,7 @@ async function loadFromCloud(){
       render();
       pill.textContent='Loaded';pill.className='pill green';
       timeEl.textContent=window.TSFB.formatLastSync();
-      toast('✓ Workspace loaded from cloud ('+data.tasks.length+' tasks)');
+      toast('✓ Workspace loaded from cloud ('+totalItems+' items)');
     }else{
       pill.textContent='Ready';pill.className='pill blue';
     }
