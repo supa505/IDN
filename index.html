@@ -1927,7 +1927,9 @@ window.TSApp={
  exportData,
  importData,
  resetToDemo,
- clearAllData
+ clearAllData,
+ syncToCloud,
+ loadFromCloud
 };
 
 for(const [key,fn] of Object.entries(window.TSApp))if(typeof fn==='function')window.TSApp[key]=function(...args){try{const result=fn(...args);if(result&&typeof result.catch==='function')return result.catch(error=>toast('Action stopped: '+error.message));return result;}catch(error){toast('Action stopped: '+error.message);}};
